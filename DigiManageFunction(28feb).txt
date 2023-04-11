@@ -1,0 +1,1052 @@
+1.----------------------------------
+
+-- FUNCTION: public.uuid_generate_v4()
+
+-- DROP FUNCTION IF EXISTS public.uuid_generate_v4();
+
+CREATE OR REPLACE FUNCTION public.uuid_generate_v4(
+	)
+    RETURNS uuid
+    LANGUAGE 'c'
+    COST 1
+    VOLATILE STRICT PARALLEL SAFE 
+AS '$libdir/uuid-ossp', 'uuid_generate_v4'
+;
+
+ALTER FUNCTION public.uuid_generate_v4()
+    OWNER TO postgres;
+
+2.--------------------------------------------------
+
+-- FUNCTION: public.shuffle(text)
+
+-- DROP FUNCTION IF EXISTS public.shuffle(text);
+
+CREATE OR REPLACE FUNCTION public.shuffle(
+	text)
+    RETURNS text
+    LANGUAGE 'sql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+    select string_agg(ch, '')
+    from (
+        select substr($1, i, 1) ch
+        from generate_series(1, length($1)) i
+        order by random()
+        ) s
+$BODY$;
+
+ALTER FUNCTION public.shuffle(text)
+    OWNER TO postgres;
+3.-----------------------------------------------
+
+-- FUNCTION: public.generate_password()
+
+-- DROP FUNCTION IF EXISTS public.generate_password();
+
+CREATE OR REPLACE FUNCTION public.generate_password(
+	)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+    chars text[] := '{1,2,3,4,5,6}';
+    password text := '';
+BEGIN
+    FOR i IN 1..6 LOOP
+        password := password || chars[ceil(random()*array_length(chars, 1))];
+    END LOOP;
+    RETURN password;
+END;
+$BODY$;
+
+ALTER FUNCTION public.generate_password()
+    OWNER TO postgres;
+
+4.------------------------------------------------------
+
+-- FUNCTION: public.fn_validate_masteradmin(text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_validate_masteradmin(text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_validate_masteradmin(
+	_userid text,
+	_password text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+DECLARE
+
+_masterUserAccount refcursor; 
+BEGIN
+	OPEN _masterUserAccount FOR select * from masterbranch
+                                where email=_userid and password=_password and status='Active' and accounttype='Admin';						  
+	RETURN NEXT _masterUserAccount;
+END;
+$BODY$;
+
+ALTER FUNCTION public.fn_validate_masteradmin(text, text)
+    OWNER TO postgres;
+
+5.------------------------------------------------------------
+
+-- FUNCTION: public.fn_update_mastervisitor(text, text, text, text, text, text, text, text, text, text, text, text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_update_mastervisitor(text, text, text, text, text, text, text, text, text, text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_update_mastervisitor(
+	_visitor_id text,
+	_firstname text,
+	_lastname text,
+	_emailid text,
+	_phone text,
+	_accessories text,
+	_id_proof text,
+	_department text,
+	_branch text,
+	_whomtomeet text,
+	_purposeofvisiting text,
+	_company_name text,
+	_address text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+begin
+
+update mastervisitor set
+		
+		firstname = _firstname, lastname = _lastname, emailid= _emailid, phone = _phone, accessories = _accessories, id_proof = _id_proof, department = _department, branch = _branch,
+		whomtomeet = _whomtomeet, purposeofvisiting = _purposeofvisiting, company_name = _company_name, address = _address
+		where visitor_id = _visitor_id;
+		
+       Return 'Details Updated Successfully.';                 
+
+end;
+$BODY$;
+
+ALTER FUNCTION public.fn_update_mastervisitor(text, text, text, text, text, text, text, text, text, text, text, text, text)
+    OWNER TO postgres;
+
+
+6.-------------------------------------------------------------
+
+-- FUNCTION: public.fn_update_exittimebyid(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_update_exittimebyid(text);
+
+CREATE OR REPLACE FUNCTION public.fn_update_exittimebyid(
+	_visitor_id text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+	_Status text;
+	_VId text;
+begin
+
+		update MasterVisitor set Status = 'Out' , Exit_Time = (CURRENT_TIMESTAMP)
+			where visitor_id = _visitor_id and Status = 'In';
+			
+			        select Status, visitor_id into _Status, _VId from MasterVisitor where visitor_id = _visitor_id and Status = 'In';
+					
+					update mastergroupvisitor set status = 'Out' where sysvisitoruuid = _visitor_id;
+
+				return 'Exit Time & Status Succefully Updated';
+				
+	end 
+$BODY$;
+
+ALTER FUNCTION public.fn_update_exittimebyid(text)
+    OWNER TO postgres;
+
+
+7.------------------------------------------------------
+
+-- FUNCTION: public.fn_select_visitorcard_drop()
+
+-- DROP FUNCTION IF EXISTS public.fn_select_visitorcard_drop();
+
+CREATE OR REPLACE FUNCTION public.fn_select_visitorcard_drop(
+	)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_VCardNo refcursor;
+begin
+open _VCardNo for
+SELECT mvc.sysvisitoruuid AS Text, mvc.visitorcardno as Value 
+FROM mastervisitorcard mvc
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM mastergroupvisitor mgv
+    WHERE mgv.vcardno = mvc.visitorcardno and status = 'In'
+);
+return next _VCardNo;
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_select_visitorcard_drop()
+    OWNER TO postgres;
+
+
+8.------------------------------------------------
+
+-- FUNCTION: public.fn_select_visitorbyid(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_select_visitorbyid(text);
+
+CREATE OR REPLACE FUNCTION public.fn_select_visitorbyid(
+	_visitor_id text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_visitorlist refcursor;
+begin
+open _visitorlist for select * from mastervisitor where visitor_id = _visitor_id;
+return next _visitorlist;
+end;
+$BODY$;
+
+ALTER FUNCTION public.fn_select_visitorbyid(text)
+    OWNER TO postgres;
+
+9-------------------------------------------------------
+
+-- FUNCTION: public.fn_postvisitor_card(text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_postvisitor_card(text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_postvisitor_card(
+	_visitorcardno text,
+	_postedby text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+begin
+ 
+ 		insert into mastervisitorcard(visitorcardno, postedby)
+ 			
+			select _visitorcardno, _postedby ;
+ 	
+		return 'Visitor Card Added';
+	end
+	
+$BODY$;
+
+ALTER FUNCTION public.fn_postvisitor_card(text, text)
+    OWNER TO postgres;
+10.----------------------------------------------------
+
+-- FUNCTION: public.fn_postmasteremployee(text, text, text, text, text, text, text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_postmasteremployee(text, text, text, text, text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_postmasteremployee(
+	_empid text,
+	_firstname text,
+	_lastname text,
+	emailid text,
+	phone text,
+	department text,
+	_location text,
+	_postedby text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+begin
+
+	insert into masteremployee(empid,firstname,lastname,emailid,phone,department,beselocation,postedby, status)
+
+		select _empid , _firstname , _lastname , emailid , phone , department , _location , _postedby, 'Active' ;
+		
+			return 'Employee Added Successfully';
+			
+	end
+	
+$BODY$;
+
+ALTER FUNCTION public.fn_postmasteremployee(text, text, text, text, text, text, text, text)
+    OWNER TO postgres;
+
+
+11.-------------------------------------------------
+-- FUNCTION: public.fn_postmasteremployee(integer, text, text, text, text, text, text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_postmasteremployee(integer, text, text, text, text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_postmasteremployee(
+	_empid integer,
+	_firstname text,
+	_lastname text,
+	emailid text,
+	phone text,
+	department text,
+	_location text,
+	_postedby text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+begin
+
+	insert into masteremployee(empid,firstname,lastname,emailid,phone,department,beselocation,postedby, status)
+
+		select (_empid , _firstname , _lastname , emailid , phone , department , _location , _postedby, 'Active' );
+		
+			return 'Employee Added Successfully';
+			
+	end
+	
+$BODY$;
+
+ALTER FUNCTION public.fn_postmasteremployee(integer, text, text, text, text, text, text, text)
+    OWNER TO postgres;
+
+
+12-----------------------------------------------------------
+
+-- FUNCTION: public.fn_post_mastervisitor_try_version(text, text, integer, text, text, text, text, text, text, text, text, text, text, text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_post_mastervisitor_try_version(text, text, integer, text, text, text, text, text, text, text, text, text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_post_mastervisitor_try_version(
+	_firstname text,
+	_lastname text,
+	_no_ofvisittor integer,
+	_emailid text,
+	_phone text,
+	_idproof text,
+	_department text,
+	_whomtomeet text,
+	_purposeofvisiting text,
+	_photo text,
+	_company_name text,
+	_address text,
+	_visitor_cardno text,
+	_accessories text,
+	_postedby text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+ _VisitorAuto text;
+ _LineidAuth bigint;
+ _sysvisitoruuid text;
+ _visitorCardNo text;
+ _Status text;
+ _visitorname text;
+
+begin
+ 
+
+		SELECT string_agg(shuffle('0123456789')::char, '') into _VisitorAuto FROM generate_series(1, 4);	
+
+		INSERT INTO mastervisitor(visitor_id, firstname ,lastname ,emailid ,phone ,Id_proof ,department ,whomtomeet ,
+        purposeofvisiting ,photo ,company_name ,address ,visitor_cardno ,accessories ,postedby,status)
+		
+		select _VisitorAuto, _firstname ,_lastname ,_emailid ,_phone ,_idproof ,_department ,_whomtomeet ,
+        _purposeofvisiting ,_photo ,_company_name ,_address ,_visitor_cardno ,_accessories ,_postedby,'In'
+		Returning LineID into _LineidAuth;
+		
+		 FOR i IN 1.._no_ofvisittor LOOP
+		  	
+		
+			SELECT (firstname||' '||lastname) as fullname, visitor_id, visitor_cardno, status 
+			INTO _visitorname, _sysvisitoruuid, _visitorCardNo, _Status
+			FROM mastervisitor 
+			WHERE lineid = _LineidAuth;
+
+			insert into mastergroupvisitor(sysvisitoruuid,visitorname,vcardno,status,postedby)
+   
+   			select _sysvisitoruuid,_visitorname,_visitorCardNo,_Status,'Admin';
+			
+		  END LOOP;
+  
+          RETURN 'Visitors CardId Created Successfully.';
+		  		
+		
+		
+        RETURN 'Visitor Created Successfully.';
+     
+  
+
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_post_mastervisitor_try_version(text, text, integer, text, text, text, text, text, text, text, text, text, text, text, text)
+    OWNER TO postgres;
+13---------------------------------------------------------
+
+-- FUNCTION: public.fn_post_masterpurpose(text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_post_masterpurpose(text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_post_masterpurpose(
+	_purpose_of_visit text,
+	_session_id text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+declare
+_visitbranch refcursor;
+_PasswordAuto text;
+
+begin
+		
+		
+		insert into mastervisitingpurpose (purpose_of_visit,postedby)
+		
+		select _purpose_of_visit, _session_id ;
+
+			RETURN 'purpose  Created Successfully.';
+
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_post_masterpurpose(text, text)
+    OWNER TO postgres;
+14------------------------------------------------------------------
+
+-- FUNCTION: public.fn_post_masterbranch(text, text, text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_post_masterbranch(text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_post_masterbranch(
+	_branchname text,
+	_email text,
+	_phone text,
+	_location text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+declare
+_visitbranch refcursor;
+_PasswordAuto text;
+
+begin
+		SELECT string_agg(shuffle('0123456789')::char, '') into _PasswordAuto FROM generate_series(1, 6);
+		
+		insert into masterbranch (branchname, email,phone, location, password , status, accounttype)
+		
+		select  _branchname , _email , _phone , _location , _PasswordAuto,  'Active','Admin';
+
+			RETURN 'Branch  Created Successfully.';
+
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_post_masterbranch(text, text, text, text)
+    OWNER TO postgres;
+15.-----------------------------------------------
+
+-- FUNCTION: public.fn_post_existing_visitor(text, text, integer, text, text, text, text, text, text, text, text, text, text, text, text)
+
+-- DROP FUNCTION IF EXISTS public.fn_post_existing_visitor(text, text, integer, text, text, text, text, text, text, text, text, text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.fn_post_existing_visitor(
+	_firstname text,
+	_lastname text,
+	_no_ofvisittor integer,
+	_emailid text,
+	_phone text,
+	_idproof text,
+	_department text,
+	_whomtomeet text,
+	_purposeofvisiting text,
+	_photo text,
+	_company_name text,
+	_address text,
+	_visitor_cardno text,
+	_accessories text,
+	_postedby text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+ _VisitorAuto text;
+ _LineidAuth bigint;
+ _sysvisitoruuid text;
+ _visitorCardNo text;
+ _Status text;
+ _visitorname text;
+_entry_time timestamp WITHOUT time zone default CURRENT_TIMESTAMP; 
+
+begin
+ 
+
+		SELECT string_agg(shuffle('0123456789')::char, '') into _VisitorAuto FROM generate_series(1, 4);	
+
+		INSERT INTO mastervisitor(entry_time,visitor_id, firstname ,lastname ,emailid ,phone ,Id_proof ,department ,whomtomeet ,
+        purposeofvisiting ,photo ,company_name ,address ,visitor_cardno ,accessories ,postedby,status)
+		
+		select _entry_time, _VisitorAuto, _firstname ,_lastname ,_emailid ,_phone ,_idproof ,_department ,_whomtomeet ,
+        _purposeofvisiting ,_photo ,_company_name ,_address ,_visitor_cardno ,_accessories ,_postedby,'In'
+		Returning LineID into _LineidAuth;
+		
+		 FOR i IN 1.._no_ofvisittor LOOP
+		  	
+		
+			SELECT (firstname||' '||lastname) as fullname, visitor_id, visitor_cardno, status 
+			INTO _visitorname, _sysvisitoruuid, _visitorCardNo, _Status
+			FROM mastervisitor 
+			WHERE lineid = _LineidAuth;
+
+			insert into mastergroupvisitor(sysvisitoruuid,visitorname,vcardno,status,postedby)
+   
+   			select _sysvisitoruuid,_visitorname,_visitorCardNo,_Status,'Admin';
+			
+		  END LOOP;
+  
+          RETURN 'Visitors CardId Created Successfully.';
+		  		
+		
+		
+        RETURN 'Visitor Created Successfully.';
+     
+  
+
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_post_existing_visitor(text, text, integer, text, text, text, text, text, text, text, text, text, text, text, text)
+    OWNER TO postgres;
+16.------------------------------------------------
+-- FUNCTION: public.fn_getvisitorcardnodrop(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getvisitorcardnodrop(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getvisitorcardnodrop(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_VCardNo refcursor;
+begin
+open _VCardNo for select sysvisitoruuid as text, visitorcardno as value from mastervisitorcard where 
+	postedby = _sessionid and visitorcardno not in(select visitor_cardno
+	from mastervisitor where status='In' );
+return next _VCardNo;
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getvisitorcardnodrop(text)
+    OWNER TO postgres;
+17---------------------------------------------------------------
+
+-- FUNCTION: public.fn_getvisitorcardno(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getvisitorcardno(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getvisitorcardno(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_VCardNo refcursor;
+begin
+open _VCardNo for select sysvisitoruuid as text, visitorcardno as value from mastervisitorcard where postedby = _sessionid ;
+return next _VCardNo;
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getvisitorcardno(text)
+    OWNER TO postgres;
+18---------------------------------------------------
+
+-- FUNCTION: public.fn_getmastervisitingpurposedrop(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getmastervisitingpurposedrop(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getmastervisitingpurposedrop(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare 
+_IdProofDrop refcursor;
+
+begin
+
+	open _IdProofDrop for Select sysvisitinguuid as text, purpose_of_visit as value from mastervisitingpurpose where postedby = _sessionid;
+	
+	return next _IdProofDrop;
+	
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getmastervisitingpurposedrop(text)
+    OWNER TO postgres;
+19-------------------------------------------------------------
+
+-- FUNCTION: public.fn_getmasteridproofdrop(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getmasteridproofdrop(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getmasteridproofdrop(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare 
+_IdProofDrop refcursor;
+
+begin
+
+	open _IdProofDrop for Select sysidproofuuid as text, idproof as value from masteridproof where postedby = _sessionid;
+	
+	return next _IdProofDrop;
+	
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getmasteridproofdrop(text)
+    OWNER TO postgres;
+20------------------------------------------------------------
+
+-- FUNCTION: public.fn_getmasterempdrp(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getmasterempdrp(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getmasterempdrp(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare 
+_IdProofDrop refcursor;
+
+begin
+
+	open _IdProofDrop for Select sysemployeeuuid as text, firstname as value from masteremployee where postedby = _sessionid;
+	
+	return next _IdProofDrop;
+	
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getmasterempdrp(text)
+    OWNER TO postgres;
+21--------------------------------------------------------
+
+-- FUNCTION: public.fn_getmasterdeptdrop(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getmasterdeptdrop(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getmasterdeptdrop(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare 
+_IdProofDrop refcursor;
+
+begin
+
+	open _IdProofDrop for Select sysdepartmentuuid as text, department as value from masterdepartment where postedby = _sessionid;
+	
+	return next _IdProofDrop;
+	
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getmasterdeptdrop(text)
+    OWNER TO postgres;
+22-----------------------------------------------------------------
+
+-- FUNCTION: public.fn_getmasteraccessoriesdrop(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getmasteraccessoriesdrop(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getmasteraccessoriesdrop(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare 
+_AccDrop refcursor;
+
+begin
+
+	open _AccDrop for Select sysAccessoriesuuid as text, Accessories as value from masterAccessories where postedby = _sessionid;
+	
+	return next _AccDrop;
+	
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getmasteraccessoriesdrop(text)
+    OWNER TO postgres;
+23-----------------------------------------------------------
+
+-- FUNCTION: public.fn_getexistingvisitorcardno(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getexistingvisitorcardno(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getexistingvisitorcardno(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_VCardNo refcursor;
+begin
+open _VCardNo for select sysvisitoruuid as text, visitorcardno as value from mastervisitorcard where postedby = _sessionid and visitorcardno not in(select visitorcardno from mastervisitor where status='In' )order by visitorcardno;
+return next _VCardNo;
+end
+$BODY$;
+
+ALTER FUNCTION public.fn_getexistingvisitorcardno(text)
+    OWNER TO postgres;
+24--------------------------------------------------------------
+
+-- FUNCTION: public.fn_getemplyeedata(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_getemplyeedata(text);
+
+CREATE OR REPLACE FUNCTION public.fn_getemplyeedata(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_masterEmp refcursor;
+
+begin
+	
+	open _masterEmp for select * from masteremployee where postedby = _SessionId and status = 'Active';
+		return next _masterEmp;
+	
+	end
+$BODY$;
+
+ALTER FUNCTION public.fn_getemplyeedata(text)
+    OWNER TO postgres;
+25---------------------------------------------------------------
+
+
+CREATE OR REPLACE FUNCTION public.fn_get_visitordetails(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare 
+std refcursor;
+_VisitorDataTableCount refcursor;
+begin
+	open std for  select (firstname ||' '|| lastname) as FullName, * from mastervisitor where status = 'In' and  postedby = _sessionid;
+
+	return next std;
+	
+	Open _VisitorDataTableCount FOR SELECT count(*) as TotalVisitor, 
+										sum(case when status = 'In' then 1 else 0 end) as In,
+										sum(case when status = 'Out' then 1 else 0 end) as Out
+										FROM mastervisitor;
+                                        
+                                        
+
+        RETURN NEXT _VisitorDataTableCount;
+end;
+$BODY$;
+26------------------------------------------------------
+
+-- FUNCTION: public.fn_get_masterpurpose(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_get_masterpurpose(text);
+
+CREATE OR REPLACE FUNCTION public.fn_get_masterpurpose(
+	session_id text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+
+declare
+_mstrbranch refcursor;
+begin
+
+open _mstrbranch for  select MP.sysvisitinguuid,MP.lineid, MP.purpose_of_visit,MB.accounttype,MP.posteddatetime  from mastervisitingpurpose MP 
+join masterbranch MB on MB.sysbranchuuid=MP.postedby where MP.postedby=session_id;
+
+	return next _mstrbranch;
+
+	end
+$BODY$;
+
+ALTER FUNCTION public.fn_get_masterpurpose(text)
+    OWNER TO postgres;
+
+27----------------------------------------------------
+
+-- FUNCTION: public.fn_get_masterbranch()
+
+-- DROP FUNCTION IF EXISTS public.fn_get_masterbranch();
+
+CREATE OR REPLACE FUNCTION public.fn_get_masterbranch(
+	)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+
+declare
+_mstrbranch refcursor;
+begin
+
+open _mstrbranch for  select  * from masterbranch ;
+
+	return next _mstrbranch;
+
+	end
+$BODY$;
+
+ALTER FUNCTION public.fn_get_masterbranch()
+    OWNER TO postgres;
+28----------------------------------------------------
+-- FUNCTION: public.fn_get_existingvisitor()
+
+-- DROP FUNCTION IF EXISTS public.fn_get_existingvisitor();
+
+CREATE OR REPLACE FUNCTION public.fn_get_existingvisitor(
+	_session_id text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare 
+std refcursor;
+begin
+	open std for  select  * from mastervisitor where status = 'Out' and  postedby = _session_id;
+
+	return next std;
+	
+end;
+$BODY$;
+29----------------------------------------------------------
+
+-- FUNCTION: public.fn_api_select_employeeimagesidwise(text)
+
+-- DROP FUNCTION IF EXISTS public.fn_api_select_employeeimagesidwise(text);
+
+CREATE OR REPLACE FUNCTION public.fn_api_select_employeeimagesidwise(
+	_visitorid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+DECLARE
+_VisitorDetailImages refcursor; 
+BEGIN
+	OPEN _VisitorDetailImages FOR select photo from mastervisitor where visitor_id= _visitorid;						
+	RETURN NEXT _VisitorDetailImages;
+END;
+$BODY$;
+
+ALTER FUNCTION public.fn_api_select_employeeimagesidwise(text)
+    OWNER TO postgres;
+30.------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fn_postmasterdepartment(
+	_department text,
+	_postedby text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+begin
+
+	INSERT INTO masterdepartment (department, postedby )	
+		
+		select _department , _postedby;
+		
+		return 'Department Added successfully';
+		
+	end
+	
+$BODY$;
+31.--------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fn_getmasterdepeartment(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+
+declare
+_MasterDept refcursor;
+begin
+
+open _MasterDept for
+
+			select MD.lineid, MD.sysdepartmentuuid, MD.department,  MD.posteddatetime , MB.accounttype
+				from Masterdepartment MD 
+					join MasterBranch MB on MB.sysbranchuuid = MD.postedby
+				where MD.postedby = _sessionid;
+	
+		return next _MasterDept ;
+	end
+$BODY$;
+
+33.-------------------------------------------------------------------------
+
+
+CREATE OR REPLACE FUNCTION public.fn_getidproof(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_IdProof refcursor;
+begin
+	open _IdProof for
+		select MIP.lineid,MIP.sysidproofuuid,MIP.idproof,MIP.posteddatetime,MB.accounttype from masteridproof MIP
+							join MasterBranch MB on MB.sysbranchuuid = MIP.postedby
+								where MIP.postedby = _sessionid;
+
+				return next _IdProof;
+	end
+$BODY$;
+
+34-----------------------------------------------------------------------------
+
+
+CREATE OR REPLACE FUNCTION public.fn_getvisitorcardno(
+	_sessionid text)
+    RETURNS SETOF refcursor 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+_VCardNo refcursor;
+begin
+open _VCardNo for 
+
+				select MVC.sysvisitoruuid, MVC.visitorcardno,  MVC.posteddatetime , MB.accounttype
+							from mastervisitorcard MVC
+								join MasterBranch MB on MB.sysbranchuuid = MVC.accounttype
+							where MVC.postedby = _sessionid;
+
+				return next _VCardNo;
+		end
+$BODY$;
+
+35---------------------------------------------------------------------
+
+
+CREATE OR REPLACE FUNCTION public.fn_postvisitor_card(
+	_visitorcardno text,
+	_postedby text)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+begin
+ 
+ 		insert into mastervisitorcard(visitorcardno, postedby)
+ 			
+			select _visitorcardno, _postedby ;
+ 	
+		return 'Visitor Card Added';
+	end
+	
+$BODY$;
